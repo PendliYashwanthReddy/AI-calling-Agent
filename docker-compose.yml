@@ -1,0 +1,41 @@
+# Environment variables are the single source of truth and are injected at
+# runtime by your platform:
+#   • Coolify / Dokploy / Portainer → set them in the service "Environment" UI
+#   • Plain Docker on a VPS         → `docker compose --env-file .env up -d`
+#                                      (the --env-file only feeds ${...} below)
+# No secrets are baked into the image (see .dockerignore).
+services:
+  outboundai:
+    build: .
+    container_name: outboundai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-live-preview}
+      GEMINI_TTS_VOICE: ${GEMINI_TTS_VOICE:-Aoede}
+      USE_GEMINI_REALTIME: ${USE_GEMINI_REALTIME:-true}
+      VOBIZ_SIP_DOMAIN: ${VOBIZ_SIP_DOMAIN:-}
+      VOBIZ_USERNAME: ${VOBIZ_USERNAME:-}
+      VOBIZ_PASSWORD: ${VOBIZ_PASSWORD:-}
+      VOBIZ_OUTBOUND_NUMBER: ${VOBIZ_OUTBOUND_NUMBER:-}
+      OUTBOUND_TRUNK_ID: ${OUTBOUND_TRUNK_ID:-}
+      DEFAULT_TRANSFER_NUMBER: ${DEFAULT_TRANSFER_NUMBER:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      CALCOM_API_KEY: ${CALCOM_API_KEY:-}
+      CALCOM_EVENT_TYPE_ID: ${CALCOM_EVENT_TYPE_ID:-}
+      CALCOM_TIMEZONE: ${CALCOM_TIMEZONE:-Asia/Kolkata}

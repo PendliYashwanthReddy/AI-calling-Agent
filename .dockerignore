@@ -1,0 +1,18 @@
+# Never bake secrets or local cruft into the image.
+# Guarantees the container's only config source is VPS/Coolify env vars.
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+*.log
+venv/
+.venv/
+node_modules/
+.git/
+.gitignore
+LIvekitAIVoice/
+*.db
+*.sqlite
+.DS_Store
