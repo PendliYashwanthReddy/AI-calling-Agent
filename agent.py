@@ -279,31 +279,11 @@ async def entrypoint(ctx: agents.JobContext):
     await ctx.connect()
     await _log("info", f"Connected to LiveKit room: {ctx.room.name}")
 
-    # ── Dial — MUST come before session.start() ──────────────────────────────
-    if phone_number:
-        trunk_id = os.getenv("OUTBOUND_TRUNK_ID")
-        if not trunk_id:
-            await _log("error", "OUTBOUND_TRUNK_ID not set — cannot place outbound call")
-            ctx.shutdown()
-            return
-        await _log("info", f"Dialing {phone_number} via SIP trunk {trunk_id}")
-        try:
-            await ctx.api.sip.create_sip_participant(
-                api.CreateSIPParticipantRequest(
-                    room_name=ctx.room.name,
-                    sip_trunk_id=trunk_id,
-                    sip_call_to=phone_number,
-                    participant_identity=f"sip_{phone_number}",
-                    wait_until_answered=True,
-                )
-            )
-        except Exception as exc:
-            await _log("error", f"SIP dial FAILED for {phone_number}: {exc}")
-            ctx.shutdown()
-            return
-        await _log("info", f"Call ANSWERED — {phone_number} picked up, starting AI session now")
-
-    # ── Build and start Gemini Live ──────────────────────────────────────────
+    # ── Build & WARM the AI session BEFORE dialing ───────────────────────────
+    # Starting the session before the call rings means the Gemini Live
+    # connection handshake overlaps the ring time, so the agent can greet the
+    # INSTANT the caller answers (this is the proven LiveKit outbound pattern).
+    # The agent stays silent until we explicitly call generate_reply() below.
     await _log("info", f"Building AI session — model={effective_model}, voice={effective_voice}")
     active_tools = tool_ctx.build_tool_list(enabled_tools)
     await _log("info", f"Tools loaded: {[t.__name__ for t in active_tools]}")
@@ -327,9 +307,50 @@ async def entrypoint(ctx: agents.JobContext):
     except TypeError as exc:
         await _log("warning", f"room_input_options rejected ({exc}) — starting without noise cancellation")
         await session.start(room=ctx.room, agent=agent)
-    await _log("info", "Agent session started — AI ready, generating greeting")
+    await _log("info", "AI session warmed — ready to greet the moment the call connects")
 
-    # ── Optional S3 recording ────────────────────────────────────────────────
+    # ── Dial (AI is already warm, so the greeting fires instantly on answer) ──
+    if phone_number:
+        trunk_id = os.getenv("OUTBOUND_TRUNK_ID")
+        if not trunk_id:
+            await _log("error", "OUTBOUND_TRUNK_ID not set — cannot place outbound call")
+            ctx.shutdown()
+            return
+        await _log("info", f"Dialing {phone_number} via SIP trunk {trunk_id}")
+        try:
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    sip_trunk_id=trunk_id,
+                    sip_call_to=phone_number,
+                    participant_identity=f"sip_{phone_number}",
+                    wait_until_answered=True,
+                )
+            )
+        except Exception as exc:
+            await _log("error", f"SIP dial FAILED for {phone_number}: {exc}")
+            ctx.shutdown()
+            return
+        await _log("info", f"Call ANSWERED — {phone_number} picked up")
+
+    # ── Greet IMMEDIATELY on answer ──────────────────────────────────────────
+    # Proactively trigger the opening line so the caller hears the agent right
+    # away instead of dead air (we no longer rely on any "autonomous" greeting).
+    greeting = (
+        f"You are now connected to {lead_name}. Greet them warmly by name, briefly "
+        f"introduce yourself and {business_name}, and state why you're calling in one short sentence."
+        if phone_number else "Greet the caller warmly and introduce yourself."
+    )
+    try:
+        await session.generate_reply(instructions=greeting)
+    except Exception as _gr_exc:
+        await _log("warning", f"generate_reply failed ({_gr_exc}) — trying say() fallback")
+        try:
+            await session.say(f"Hi! Am I speaking with {lead_name}?")
+        except Exception as _say_exc:
+            await _log("warning", f"say() fallback also failed: {_say_exc}")
+
+    # ── Optional S3 recording (started after the greeting so it never delays it) ──
     if phone_number:
         _aws_key    = os.getenv("S3_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID", "")
         _aws_secret = os.getenv("S3_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY", "")
@@ -354,22 +375,6 @@ async def entrypoint(ctx: agents.JobContext):
                 await _log("info", f"Recording started: egress={_egress.egress_id}")
             except Exception as _exc:
                 await _log("warning", f"Recording start failed (non-fatal): {_exc}")
-
-    # ── Greeting ─────────────────────────────────────────────────────────────
-    # gemini-3.1 and gemini-2.5 native-audio speak autonomously from system prompt.
-    # generate_reply() is blocked by the plugin for these models — skip it entirely.
-    _active_model = effective_model
-    if "3.1" in _active_model or "2.5" in _active_model:
-        await _log("info", "Gemini native-audio: model will greet autonomously from system prompt")
-    else:
-        greeting = (
-            f"The call just connected. Greet the lead and ask if you're speaking with {lead_name}."
-            if phone_number else "Greet the caller warmly."
-        )
-        try:
-            await session.generate_reply(instructions=greeting)
-        except Exception as _gr_exc:
-            await _log("warning", f"generate_reply failed: {_gr_exc}")
 
     # ── Keep session alive until SIP participant actually leaves ─────────────
     # Without this block, the entrypoint returns and the process spins down.
