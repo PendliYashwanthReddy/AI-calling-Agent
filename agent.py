@@ -110,19 +110,32 @@ def _build_session(tools: list, system_prompt: str,
     if use_realtime and RealtimeModel is not None:
         from google.genai import types as _gt
 
-        # ── 3 mandatory silence-prevention configs ──
+        # ── Freeze-prevention configs (keep the session alive, no audio impact) ──
         session_resumption = _gt.SessionResumptionConfig(transparent=True)
         context_window_compression = _gt.ContextWindowCompressionConfig(
             trigger_tokens=25600,
             sliding_window=_gt.SlidingWindow(target_tokens=12800),
         )
+
+        # ── Turn-taking responsiveness (env-tunable; controls how fast the agent
+        #    replies after the caller stops speaking). Lower silence + HIGH
+        #    sensitivity = snappier. Too low risks the agent interrupting; tune
+        #    EOU_SILENCE_MS / EOU_SENSITIVITY without a code change if needed. ──
+        _silence_ms = int(os.getenv("EOU_SILENCE_MS", "600"))
+        _prefix_ms = int(os.getenv("EOU_PREFIX_MS", "100"))
+        _sens_name = os.getenv("EOU_SENSITIVITY", "HIGH").upper()
+        _sensitivity = (_gt.EndSensitivity.END_SENSITIVITY_HIGH
+                        if _sens_name == "HIGH"
+                        else _gt.EndSensitivity.END_SENSITIVITY_LOW)
         realtime_input_config = _gt.RealtimeInputConfig(
             automatic_activity_detection=_gt.AutomaticActivityDetection(
-                end_of_speech_sensitivity=_gt.EndSensitivity.END_SENSITIVITY_LOW,
-                silence_duration_ms=2000,
-                prefix_padding_ms=200,
+                end_of_speech_sensitivity=_sensitivity,
+                silence_duration_ms=_silence_ms,
+                prefix_padding_ms=_prefix_ms,
             ),
         )
+        logger.info("Turn-taking: silence=%dms, prefix=%dms, eos_sensitivity=%s",
+                    _silence_ms, _prefix_ms, _sens_name)
 
         # Build kwargs defensively — plugin versions differ in what they accept.
         # NOTE: tools are NOT passed to the model/session here — they are attached
